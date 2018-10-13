@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Ad Bot</string>
+    <string name="admin_rights">Device Administrator</string>
+    <string name="admin_description">Required to lock the device</string>
+    <string name="admin_success">Success</string>
+    <string name="admin_failure">Failure</string>
+    <string name="admin_removed">Permissions removed</string>
+    <string name="no_permissions">Permissions are required</string>
+    <string name="access">Accessibility Service</string>
+    <string name="expired">Expired</string>
+</resources>

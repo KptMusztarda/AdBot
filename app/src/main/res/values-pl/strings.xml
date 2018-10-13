@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ad Bot</string>
+    <string name="admin_rights">Administrator urządzenia</string>
+    <string name="admin_description">Wymagane by zablokować urządzenie</string>
+    <string name="admin_success">Sukces</string>
+    <string name="admin_failure">Błąd</string>
+    <string name="access">Usługa dostępności</string>
+    <string name="no_permissions">Pozwolenia są wymagane do działania</string>
+    <string name="admin_removed">Pozwolenia wyłączone</string>
+    <string name="expired">Przedawnione</string>
+</resources>
