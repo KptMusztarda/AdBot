@@ -16,7 +16,7 @@
         android:theme="@style/AppTheme"
         android:launchMode="singleTask"
         tools:ignore="GoogleAppIndexingWarning">
-        <activity android:name=".MainActivity">
+        <activity android:name="me.kptmusztarda.adbot.MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -25,7 +25,7 @@
         </activity>
 
         <service
-            android:name=".Accessibility"
+            android:name="me.kptmusztarda.adbot.Accessibility"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -36,7 +36,7 @@
         </service>
 
         <receiver
-            android:name="AdminReceiver"
+            android:name="me.kptmusztarda.adbot.AdminReceiver"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
                 android:name="android.app.device_admin"

@@ -1,12 +1,15 @@
 package me.kptmusztarda.adbot;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.KeyguardManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
@@ -21,6 +24,8 @@ import org.apache.commons.net.time.TimeTCPClient;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+
+import static android.os.PowerManager.FULL_WAKE_LOCK;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -61,20 +66,34 @@ public class MainActivity extends AppCompatActivity {
 
 //        registerReceiver(adminReceiver, new IntentFilter("android.app.action.DEVICE_ADMIN_ENABLED"), "android.permission.BIND_DEVICE_ADMIN", null);
 
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        PowerManager.WakeLock wakeLock = powerManager.newWakeLock(PowerManager.ACQUIRE_CAUSES_WAKEUP | FULL_WAKE_LOCK,
+                "MyApp::MyWakelockTag");
+        wakeLock.acquire(10*1000L /*10 seconds*/);
 
+//        getWindow().setFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
+//                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+//                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+//                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON, 0);
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        KeyguardManager keyguardManager = (KeyguardManager)getSystemService(Activity.KEYGUARD_SERVICE);
+        Logger.log(TAG, "Is keyguard locked? " + Boolean.toString(keyguardManager.isKeyguardLocked()));
+        if(keyguardManager.isKeyguardLocked()) {
+            if(android.os.Build.VERSION.SDK_INT >= 26)keyguardManager.requestDismissKeyguard(this, null);
+            else {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
+            }
+        }
+
 
 
         active = getIntent().getIntExtra("ACTIVE", 0);
-//        Log.i(TAG, "Activity started with ACTION extra = " + active);
+//        Logger.log(TAG, "Activity started with ACTION extra = " + active);
 //        new Thread(new Runnable() {
 //            @Override
 //            public void run() {
-//                Log.i(TAG, "Tiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiime = " + getTime());
+//                Logger.log(TAG, "Tiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiime = " + getTime());
 //            }
 //        }).start();
 
@@ -98,7 +117,7 @@ public class MainActivity extends AppCompatActivity {
                                 Date strDate;
                                 expired[0] = false;
                                 try {
-                                    strDate = sdf.parse("15/10/2018");
+                                    strDate = sdf.parse("17/10/2018");
                                     if (getTime().after(strDate)) {
                                         expired[0] = true;
                                     }
@@ -131,17 +150,35 @@ public class MainActivity extends AppCompatActivity {
         });
         mainSwitch.setChecked(active == 1);
 
-        Log.i(TAG, "isReadyToGo? " + Boolean.toString(isReadyToGo()));
+        Logger.log(TAG, "isReadyToGo? " + Boolean.toString(isReadyToGo()));
+        final Activity activity = this;
 
         if(active == 1 && isReadyToGo()) {
-            Log.i(TAG, "Delaying Back press");
+            Logger.log(TAG, "Delaying Back press");
             final Handler handler = new Handler();
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     if(active == 1) {
-                        Log.i(TAG, "Back press");
+
+//                        Logger.log(TAG, "Swipe");
+//                        sendBroadcast(new Intent(Accessibility.ACTION_SWIPE));
+
+
+                        Logger.log(TAG, "Back press");
                         sendBroadcast(new Intent(Accessibility.ACTION_BACK));
+
+//                        Logger.log(TAG, "Delaying back press");
+//                        final Handler handler = new Handler();
+//                        handler.postDelayed(new Runnable() {
+//                            @Override
+//                            public void run() {
+//                                if(active == 1) {
+//                                    Logger.log(TAG, "Back press");
+//                                    sendBroadcast(new Intent(Accessibility.ACTION_BACK));
+//                                }
+//                            }
+//                        }, delay);
                     }
                 }
             }, delay);
@@ -198,24 +235,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void start() {
-        Log.i(TAG, "Delaying locking");
+        Logger.log(TAG, "Delaying locking");
         final Handler handler = new Handler();
         handler.postDelayed(new Runnable() {
             @Override
             public void run() {
 
                 if(active == 1) {
-                    Log.i(TAG, "Locking");
+                    Logger.log(TAG, "Locking");
                     mDevicePolicyManager.lockNow();
 
-                    Log.i(TAG, "Delaying unlocking");
+                    Logger.log(TAG, "Delaying unlocking");
                     final Handler handler = new Handler();
                     handler.postDelayed(new Runnable() {
                         @Override
                         public void run() {
                             Intent intent = new Intent(getApplicationContext(), MainActivity.class);
                             intent.putExtra("ACTIVE", active);
-                            Log.i(TAG, "Unlocking");
+                            Logger.log(TAG, "Unlocking");
                             startActivity(intent);
                         }
                     }, delay);
@@ -223,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
                     finish();
                 }
             }
-        }, delay*2);
+        }, delay*3);
     }
 
 
@@ -252,7 +289,7 @@ public class MainActivity extends AppCompatActivity {
         boolean accessibilityFound = false;
         try {
             accessibilityEnabled = Settings.Secure.getInt(this.getContentResolver(),android.provider.Settings.Secure.ACCESSIBILITY_ENABLED);
-            Log.d(TAG, "ACCESSIBILITY: " + accessibilityEnabled);
+//            Log.d(TAG, "ACCESSIBILITY: " + accessibilityEnabled);
         } catch (Settings.SettingNotFoundException e) {
             Log.d(TAG, "Error finding setting, default accessibility to not found: " + e.getMessage());
         }
@@ -260,17 +297,17 @@ public class MainActivity extends AppCompatActivity {
         TextUtils.SimpleStringSplitter mStringColonSplitter = new TextUtils.SimpleStringSplitter(':');
 
         if (accessibilityEnabled==1){
-            Log.d(TAG, "***ACCESSIBILIY IS ENABLED***: ");
+//            Log.d(TAG, "***ACCESSIBILIY IS ENABLED***: ");
 
 
             String settingValue = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            Log.d(TAG, "Setting: " + settingValue);
+//            Log.d(TAG, "Setting: " + settingValue);
             if (settingValue != null) {
                 TextUtils.SimpleStringSplitter splitter = mStringColonSplitter;
                 splitter.setString(settingValue);
                 while (splitter.hasNext()) {
                     String accessabilityService = splitter.next();
-                    Log.d(TAG, "Setting: " + accessabilityService);
+//                    Log.d(TAG, "Setting: " + accessabilityService);
                     if (accessabilityService.equalsIgnoreCase(ACCESSIBILITY_SERVICE_NAME)){
                         Log.d(TAG, "We've found the correct setting - accessibility is switched on!");
                         return true;
