@@ -22,7 +22,6 @@ import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.Log;
-import android.view.View;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.SeekBar;
@@ -34,13 +33,12 @@ import org.apache.commons.net.time.TimeTCPClient;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import java.util.Date;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    private static final String EXPIRE_DATE = "21/10/2018";
+    private static final String EXPIRE_DATE = "22/10/2018";
     private static final int ADMIN_INTENT = 15;
     private static final int SCALE = 100;
     private DevicePolicyManager mDevicePolicyManager;
@@ -50,9 +48,10 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences pref;
     private SharedPreferences.Editor prefEditor;
     private boolean active;
-    private int delayClose, delayLock, delayUnlock, cycle, adsleft, initialAds;
+    private int delayClose, delayLock, delayUnlock, cycle, adsLeft, initialAds;
     private String loop;
     private boolean switchingMainSwitch = false;
+    private AlarmManager alarmManager;
 
 
     private static final String permissions[] = {
@@ -96,28 +95,34 @@ public class MainActivity extends AppCompatActivity {
         Logger.setDirectory("", "adbot.log");
         Logger.log(TAG, "Starting activity with ACTIVE: " + active);
 
+        alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+
         unlock();
 
         setupViews();
         setDelays();
 
-        adsleft = getIntent().getIntExtra("ads", -1);
+        adsLeft = getIntent().getIntExtra("ads", -1);
         initialAds = pref.getInt("ads", 0);
-
-        Logger.log(TAG, "Ads left: " + adsleft);
+        loop = getIntent().getStringExtra("loop");
+        if(loop == null) loop = "first";
+        Logger.log(TAG, "Ads left: " + adsLeft);
         Logger.log(TAG, "Initial ads: " + initialAds);
 
-        if(active && isReadyToGo() && (adsleft != 0)) {
-//            if(adsleft == initialAds) {
-//                loop(true);
-//            } else
-                loop(false);
-            adsleft--;
-            if(adsleft == 0) {
+        if(active && isReadyToGo() && (adsLeft != 0)) {
+            String loopCopy = new String(loop);
+            if(adsLeft == 1) {
                 Logger.log(TAG, "Closing ad in " + delayClose/1000D + " seconds");
-                new Handler().postDelayed(this::closeAd, delayClose);
-                mainSwitch.setChecked(false);
+                new Handler().postDelayed(() -> {
+                    closeAd();
+                    if(!loop.contains("alarm")) mainSwitch.setChecked(false);
+                    new Handler().postDelayed(this::lock, delayLock);
+                }, delayClose);
+
+            } else {
+                loop();
             }
+            if(!loopCopy.equals("alarmfirst")) adsLeft--;
         }
     }
 
@@ -127,7 +132,7 @@ public class MainActivity extends AppCompatActivity {
         active = getIntent().getBooleanExtra("ACTIVE", false);
         setDelays();
         switchingMainSwitch = true;
-        mainSwitch.setChecked(active);
+        mainSwitch.setChecked(active || pref.getBoolean("is_alarm_set", false));
         switchingMainSwitch = false;
     }
 
@@ -168,12 +173,13 @@ public class MainActivity extends AppCompatActivity {
                         if (!isExpired()) {
 
                             int largeCycle = pref.getInt("delay", 10 * 60 *1000);
-                            if (initialAds > 0) adsleft = initialAds;
-                            else if (initialAds == 0) adsleft = -1;
-
+                            Logger.log(TAG, "LargeCycle: " + largeCycle);
                             if(largeCycle == 0) {
-
-                                loop(true);
+                                if (initialAds > 0) adsLeft = initialAds;
+                                else if (initialAds == 0) adsLeft = -1;
+                                loop = "first";
+                                Logger.log(TAG, "Starting endless loop");
+                                loop();
 
                             } else {
                                 setAlarm(largeCycle);
@@ -193,6 +199,12 @@ public class MainActivity extends AppCompatActivity {
                     intent.putExtra("ACTIVE", false);
                     setIntent(intent);
                     active = false;
+                    if(alarmManager != null) {
+                        Logger.log(TAG, "Alarm canceled");
+                        alarmManager.cancel(getAlarmIntent());
+                        prefEditor.putBoolean("is_alarm_set", false);
+                        prefEditor.commit();
+                    }
                 }
             }
         });
@@ -312,35 +324,60 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void loop(boolean first) {
+    private void loop() {
 
-        Logger.log(TAG, "Loop!!! first? " + Boolean.toString(first));
+        Logger.log(TAG, "Loop!!! " + loop);
+        if(active) {
+            if (loop.equals("first") || loop.equals("notfirst")) {
 
-        if(!first) {
-            if(active) {
-                Logger.log(TAG, "Closing ad in " + delayClose/1000D + " seconds");
-                new Handler().postDelayed(this::closeAd, delayClose);
+                if (loop.equals("notfirst")) {
+                    Logger.log(TAG, "Closing ad in " + delayClose / 1000D + " seconds");
+                    new Handler().postDelayed(this::closeAd, delayClose);
+                }
+
+                int delayLock;
+                if (loop.equals("notfirst")) delayLock = this.delayClose + this.delayLock;
+                else delayLock = 0;
+                Logger.log(TAG, "Locking in " + delayLock / 1000D + " seconds");
+                new Handler().postDelayed(this::lock, delayLock);
+
+                int delayUnlock;
+                if (loop.equals("notfirst"))
+                delayUnlock = this.delayClose + this.delayLock + this.delayUnlock;
+                else delayUnlock = this.delayUnlock;
+                Logger.log(TAG, "Unlocking in " + delayUnlock / 1000D + " seconds");
+                new Handler().postDelayed(() -> restartActivity(), delayUnlock);
+
+                loop = "notfirst";
+
+            } else if (loop.contains("alarm")) {
+
+                if (loop.contains("first")) {
+
+                    lock();
+
+                    Logger.log(TAG, "Unlocking in " + delayUnlock / 1000D + " seconds");
+                    new Handler().postDelayed(() -> restartActivity(), delayUnlock);
+
+                    loop = "alarm";
+
+                } else {
+
+                    Logger.log(TAG, "Closing ad in " + delayClose / 1000D + " seconds");
+                    new Handler().postDelayed(this::closeAd, this.delayClose);
+
+                    int delayLock = this.delayClose + this.delayLock;
+                    Logger.log(TAG, "Locking in " + delayLock / 1000D + " seconds");
+                    new Handler().postDelayed(this::lock, delayLock);
+
+                    int delayUnlock = delayLock + this.delayUnlock;
+                    Logger.log(TAG, "Unlocking in " + delayUnlock / 1000D + " seconds");
+                    new Handler().postDelayed(() -> restartActivity(), delayUnlock);
+
+                }
+
             }
-        } else {
-
         }
-
-        int delayLock;
-        if(!first) delayLock = this.delayClose + this.delayLock;
-        else delayLock = 0;
-        if(active) {
-            Logger.log(TAG, "Locking in " + delayLock/1000D + " seconds");
-            new Handler().postDelayed(this::lock, delayLock);
-        }
-
-        int delayUnlock;
-        if(!first) delayUnlock = this.delayClose + this.delayLock + this.delayUnlock;
-        else delayUnlock = this.delayUnlock;
-        if(active) {
-            Logger.log(TAG, "Unlocking in " + delayUnlock/1000D + " seconds");
-            new Handler().postDelayed(() -> restartActivity(), delayUnlock);
-        }
-
 
     }
 
@@ -388,12 +425,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void restartActivity() {
-        if(active && adsleft != 0) {
+        if(active && adsLeft != 0) {
             Logger.log(TAG, "Restarting activity");
             Intent intent = getIntent();
             intent.removeExtra("ACTIVE");
             intent.putExtra("ACTIVE", active);
-            intent.putExtra("ads", adsleft);
+            Logger.log(TAG, "Putting adsLeft Extra: " + adsLeft);
+            intent.putExtra("ads", adsLeft);
+            intent.putExtra("loop", loop);
             finish();
             startActivity(intent);
 
@@ -402,24 +441,33 @@ public class MainActivity extends AppCompatActivity {
 
     private void closeAd() {
         if(active) {
-            Logger.log(TAG, "Back press");
+            Logger.log(TAG, "Closing ad");
             sendBroadcast(new Intent(Accessibility.ACTION_BACK));
         }
     }
 
-    private void setAlarm(int x) {
-        Logger.log(TAG, "Setting alarm: " + x + " minute(s)");
-        AlarmManager alarmMgr = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+
+    private PendingIntent getAlarmIntent() {
         Intent intent = getIntent();
         intent.removeExtra("ACTIVE");
-        intent.putExtra("ACTIVE", active);
+        intent.putExtra("ACTIVE", true);
         intent.putExtra("ads", initialAds);
+        intent.putExtra("loop", "alarmfirst");
         PendingIntent alarmIntent = PendingIntent.getActivity(this, 0, intent, 0);
+        return alarmIntent;
+    }
 
-        alarmMgr.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + 500,
-                x*60*1000,
-                alarmIntent);
+    private void setAlarm(int x) {
+        if(alarmManager != null) {
+            Logger.log(TAG, "Setting alarm: " + x + " minute(s)");
+            alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime(),
+                    x*60*1000,
+                    getAlarmIntent());
+            prefEditor.putBoolean("is_alarm_set", true);
+            prefEditor.commit();
+            finish();
+        }
     }
 
     @Override
