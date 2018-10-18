@@ -9,4 +9,12 @@
     <string name="no_permissions">Pozwolenia są wymagane do działania</string>
     <string name="admin_removed">Pozwolenia wyłączone</string>
     <string name="expired">Przedawnione</string>
+    <string name="delay_before_lock">Odstęp pomiędzy zamknięciem reklamy a zablokowaniem</string>
+    <string name="delay_before_unlocking">Odstęp pomiędzy zablokowaniem a odblokowaniem</string>
+    <string name="delay_before_closing">Odstęp pomiędzy odblokowaniem a zamknięciem reklamy</string>
+    <string name="value_placeholder">wartość</string>
+    <string name="run_every">Włącz co</string>
+    <string name="minutes">minut(y)</string>
+    <string name="and_close">i zakmnij</string>
+    <string name="ads">reklam</string>
 </resources>

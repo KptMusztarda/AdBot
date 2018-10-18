@@ -8,4 +8,12 @@
     <string name="no_permissions">Permissions are required</string>
     <string name="access">Accessibility Service</string>
     <string name="expired">Expired</string>
+    <string name="delay_before_lock">Delay between closing ad and locking</string>
+    <string name="delay_before_unlocking">Delay between locking and unlocking</string>
+    <string name="delay_before_closing">Delay between unlocking and closing ad</string>
+    <string name="value_placeholder">value</string>
+    <string name="run_every">Run every</string>
+    <string name="minutes">minutes</string>
+    <string name="and_close">and close</string>
+    <string name="ads">ads</string>
 </resources>

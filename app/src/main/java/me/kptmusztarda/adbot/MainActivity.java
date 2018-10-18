@@ -2,79 +2,366 @@ package me.kptmusztarda.adbot;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlarmManager;
 import android.app.KeyguardManager;
+import android.app.PendingIntent;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.Settings;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.text.Editable;
 import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.util.Log;
+import android.view.View;
 import android.view.WindowManager;
-import android.widget.CompoundButton;
+import android.widget.EditText;
+import android.widget.SeekBar;
 import android.widget.Switch;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import org.apache.commons.net.time.TimeTCPClient;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
-
-import static android.os.PowerManager.FULL_WAKE_LOCK;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
+    private static final String EXPIRE_DATE = "21/10/2018";
     private static final int ADMIN_INTENT = 15;
+    private static final int SCALE = 100;
     private DevicePolicyManager mDevicePolicyManager;
     private ComponentName mComponentName;
-    private Switch adminSwitch, accessibilitySwitch;
-    private boolean firstCheck = true;
-    private boolean accessibilityCheck;
-    private int active;
-    private int delay = 2000;
+    private Switch adminSwitch, mainSwitch;
+    private SeekBar delayLockSeekBar, delayUnlockSeekBar, delayCloseSeekBar;
+    private SharedPreferences pref;
+    private SharedPreferences.Editor prefEditor;
+    private boolean active;
+    private int delayClose, delayLock, delayUnlock, cycle, adsleft, initialAds;
+    private String loop;
+    private boolean switchingMainSwitch = false;
+
 
     private static final String permissions[] = {
-            Manifest.permission.WAKE_LOCK,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
     };
 
-//    private void checkPermissions() {
-//        for(String p : permissions)
-//            if(ContextCompat.checkSelfPermission(this, p) != 0) {
-//                ActivityCompat.requestPermissions(this, permissions, 2137);
-//                break;
-//            }
-//    }
-//
+
+
+    private void checkPermissions() {
+        for(String p : permissions)
+            if(ContextCompat.checkSelfPermission(this, p) != 0) {
+                ActivityCompat.requestPermissions(this, permissions, 2137);
+                break;
+            }
+        prefEditor.putBoolean("first_permission_check", false);
+        prefEditor.commit();
+    }
+
 //    @Override
 //    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
-//        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_DENIED) android.os.Process.killProcess(android.os.Process.myPid());
+////        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_DENIED) {
+////            prefEditor.putBoolean("first_permission_check", false);
+////        }
+//
 //    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-//        checkPermissions();
 
-//        serviceIntent = new Intent(getApplicationContext(), MainService.class);
+        pref = getPreferences(MODE_PRIVATE);
+        prefEditor = pref.edit();
 
-//        registerReceiver(adminReceiver, new IntentFilter("android.app.action.DEVICE_ADMIN_ENABLED"), "android.permission.BIND_DEVICE_ADMIN", null);
+        if(pref.getBoolean("first_permission_check", true)) {
+            checkPermissions();
+        }
+
+        active = getIntent().getBooleanExtra("ACTIVE", false);
+
+        Logger.setDirectory("", "adbot.log");
+        Logger.log(TAG, "Starting activity with ACTIVE: " + active);
+
+        unlock();
+
+        setupViews();
+        setDelays();
+
+        adsleft = getIntent().getIntExtra("ads", -1);
+        initialAds = pref.getInt("ads", 0);
+
+        Logger.log(TAG, "Ads left: " + adsleft);
+        Logger.log(TAG, "Initial ads: " + initialAds);
+
+        if(active && isReadyToGo() && (adsleft != 0)) {
+//            if(adsleft == initialAds) {
+//                loop(true);
+//            } else
+                loop(false);
+            adsleft--;
+            if(adsleft == 0) {
+                Logger.log(TAG, "Closing ad in " + delayClose/1000D + " seconds");
+                new Handler().postDelayed(this::closeAd, delayClose);
+                mainSwitch.setChecked(false);
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        active = getIntent().getBooleanExtra("ACTIVE", false);
+        setDelays();
+        switchingMainSwitch = true;
+        mainSwitch.setChecked(active);
+        switchingMainSwitch = false;
+    }
+
+    private void setupViews() {
+        mDevicePolicyManager = (DevicePolicyManager) getSystemService(
+                Context.DEVICE_POLICY_SERVICE);
+        mComponentName = new ComponentName(this, AdminReceiver.class);
+
+        adminSwitch = findViewById(R.id.admin_switch);
+        adminSwitch.setChecked(mDevicePolicyManager.isAdminActive(mComponentName));
+        adminSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked) {
+                Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, mComponentName);
+                intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, getResources().getString(R.string.admin_description));
+                startActivityForResult(intent, ADMIN_INTENT);
+            } else {
+                mDevicePolicyManager.removeActiveAdmin(mComponentName);
+                Toast.makeText(getApplicationContext(), getResources().getString(R.string.admin_removed), Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        Switch accessibilitySwitch = findViewById(R.id.accessibility_switch);
+        accessibilitySwitch.setChecked(isAccessibilityEnabled());
+        accessibilitySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        });
+
+        mainSwitch = findViewById(R.id.switch1);
+        mainSwitch.setChecked(active);
+        mainSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if(!switchingMainSwitch) {
+                if (isChecked) {
+                    active = true;
+                    if (isReadyToGo()) {
+
+                        if (!isExpired()) {
+
+                            int largeCycle = pref.getInt("delay", 10 * 60 *1000);
+                            if (initialAds > 0) adsleft = initialAds;
+                            else if (initialAds == 0) adsleft = -1;
+
+                            if(largeCycle == 0) {
+
+                                loop(true);
+
+                            } else {
+                                setAlarm(largeCycle);
+                            }
+
+                        } else {
+                            Toast.makeText(getApplicationContext(), getResources().getString(R.string.expired), Toast.LENGTH_SHORT).show();
+                            buttonView.setChecked(false);
+                        }
+                    } else {
+                        Toast.makeText(getApplicationContext(), getResources().getString(R.string.no_permissions), Toast.LENGTH_SHORT).show();
+                        buttonView.setChecked(false);
+                    }
+                } else {
+                    Intent intent = getIntent();
+                    intent.removeExtra("ACTIVE");
+                    intent.putExtra("ACTIVE", false);
+                    setIntent(intent);
+                    active = false;
+                }
+            }
+        });
+
+        final TextView delayLockTextView = findViewById(R.id.delay_before_locking_value);
+        delayLockSeekBar = findViewById(R.id.delay_before_locking_bar);
+        delayLockSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int i, boolean b) {
+                delayLockTextView.setText(Double.toString(i*SCALE/1000D));
+                delayLock = i*SCALE;
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+
+            }
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                prefEditor.putInt("lock", seekBar.getProgress()*SCALE);
+                prefEditor.commit();
+            }
+        });
+        
+        final TextView delayUnlockTextView = findViewById(R.id.delay_before_unlocking_value);
+        delayUnlockSeekBar = findViewById(R.id.delay_before_unlocking_bar);
+        delayUnlockSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int i, boolean b) {
+                delayUnlockTextView.setText(Double.toString(i*SCALE/1000D));
+                delayUnlock = i*SCALE;
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+
+            }
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                prefEditor.putInt("unlock", seekBar.getProgress()*SCALE);
+                prefEditor.commit();
+            }
+        });
+
+        final TextView delayCloseTextView = findViewById(R.id.delay_before_closing_value);
+        delayCloseSeekBar = findViewById(R.id.delay_before_closing_bar);
+        delayCloseSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int i, boolean b) {
+                delayCloseTextView.setText(Double.toString(i*SCALE/1000D));
+                delayClose = i*SCALE;
+            }
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+
+            }
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                prefEditor.putInt("close", seekBar.getProgress()*SCALE);
+                prefEditor.commit();
+            }
+        });
+
+        EditText delayEditText = findViewById(R.id.minutes_editText);
+        delayEditText.setText(Integer.toString(pref.getInt("delay", 10)));
+        delayEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if(s.length() > 0) {
+                    int delay = Integer.parseInt(s.toString());
+                    if(delay >=0) {
+                        prefEditor.putInt("delay", delay);
+                        prefEditor.commit();
+                    } else delayEditText.setText("0");
+                }
+            }
+        });
+        delayEditText.setOnFocusChangeListener((v, hasFocus) -> {
+            if(!hasFocus && delayEditText.getText().length() < 1) delayEditText.setText("0");
+        });
+
+        EditText adsEditText = findViewById(R.id.ads_editText);
+        adsEditText.setText(Integer.toString(pref.getInt("ads", 10)));
+        adsEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if(s.length() > 0) {
+                    int ads = Integer.parseInt(s.toString());
+                    if(ads >=0) {
+                        initialAds = ads;
+                        prefEditor.putInt("ads", ads);
+                        prefEditor.commit();
+                    } else adsEditText.setText("0");
+                }
+            }
+        });
+        adsEditText.setOnFocusChangeListener((v, hasFocus) -> {
+            if(!hasFocus && adsEditText.getText().length() < 1) adsEditText.setText("0");
+        });
+    }
+
+    private void loop(boolean first) {
+
+        Logger.log(TAG, "Loop!!! first? " + Boolean.toString(first));
+
+        if(!first) {
+            if(active) {
+                Logger.log(TAG, "Closing ad in " + delayClose/1000D + " seconds");
+                new Handler().postDelayed(this::closeAd, delayClose);
+            }
+        } else {
+
+        }
+
+        int delayLock;
+        if(!first) delayLock = this.delayClose + this.delayLock;
+        else delayLock = 0;
+        if(active) {
+            Logger.log(TAG, "Locking in " + delayLock/1000D + " seconds");
+            new Handler().postDelayed(this::lock, delayLock);
+        }
+
+        int delayUnlock;
+        if(!first) delayUnlock = this.delayClose + this.delayLock + this.delayUnlock;
+        else delayUnlock = this.delayUnlock;
+        if(active) {
+            Logger.log(TAG, "Unlocking in " + delayUnlock/1000D + " seconds");
+            new Handler().postDelayed(() -> restartActivity(), delayUnlock);
+        }
+
+
+    }
+
+    private void setDelays() {
+        delayLock = pref.getInt("lock", 3000);
+        delayUnlock = pref.getInt("unlock", 3000);
+        delayClose = pref.getInt("close", 3000);
+        cycle = delayLock + delayUnlock + delayClose;
+
+        delayLockSeekBar.setProgress(delayLock/SCALE);
+        delayUnlockSeekBar.setProgress(delayUnlock/SCALE);
+        delayCloseSeekBar.setProgress(delayClose/SCALE);
+    }
+
+    private void unlock() {
+        Logger.log(TAG, "Unlocking");
 
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        PowerManager.WakeLock wakeLock = powerManager.newWakeLock(PowerManager.ACQUIRE_CAUSES_WAKEUP | FULL_WAKE_LOCK,
-                "MyApp::MyWakelockTag");
-        wakeLock.acquire(10*1000L /*10 seconds*/);
-
-//        getWindow().setFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
-//                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-//                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-//                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON, 0);
+        PowerManager.WakeLock wakeLock = powerManager.newWakeLock(PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.FULL_WAKE_LOCK,
+                "AdBot::WakeLock");
+        wakeLock.acquire(cycle);
 
         KeyguardManager keyguardManager = (KeyguardManager)getSystemService(Activity.KEYGUARD_SERVICE);
         Logger.log(TAG, "Is keyguard locked? " + Boolean.toString(keyguardManager.isKeyguardLocked()));
@@ -84,185 +371,56 @@ public class MainActivity extends AppCompatActivity {
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
             }
-        }
-
-
-
-        active = getIntent().getIntExtra("ACTIVE", 0);
-//        Logger.log(TAG, "Activity started with ACTION extra = " + active);
-//        new Thread(new Runnable() {
-//            @Override
-//            public void run() {
-//                Logger.log(TAG, "Tiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiime = " + getTime());
-//            }
-//        }).start();
-
-
-
-        Switch mainSwitch = findViewById(R.id.switch1);
-        mainSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                if(isChecked) {
-                    active = 1;
-
-                    if(isReadyToGo()) {
-
-                        final boolean expired[] = {false};
-
-                        Thread thread = new Thread(new Runnable() {
-                            @Override
-                            public void run() {
-                                SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
-                                Date strDate;
-                                expired[0] = false;
-                                try {
-                                    strDate = sdf.parse("17/10/2018");
-                                    if (getTime().after(strDate)) {
-                                        expired[0] = true;
-                                    }
-                                } catch (Exception e) {
-                                    e.printStackTrace();
-                                }
-                            }
-                        });
-                        thread.start();
-                        try {
-                            thread.join();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-
-
-                        if(!expired[0]) start();
-                        else {
-                            Toast.makeText(getApplicationContext(), getResources().getString(R.string.expired), Toast.LENGTH_SHORT).show();
-                            buttonView.setChecked(false);
-                        }
-                    }
-                    else {
-                        Toast.makeText(getApplicationContext(), getResources().getString(R.string.no_permissions), Toast.LENGTH_SHORT).show();
-                        buttonView.setChecked(false);
-                    }
-
-                } else active = 0;
-            }
-        });
-        mainSwitch.setChecked(active == 1);
-
-        Logger.log(TAG, "isReadyToGo? " + Boolean.toString(isReadyToGo()));
-        final Activity activity = this;
-
-        if(active == 1 && isReadyToGo()) {
-            Logger.log(TAG, "Delaying Back press");
-            final Handler handler = new Handler();
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if(active == 1) {
-
-//                        Logger.log(TAG, "Swipe");
-//                        sendBroadcast(new Intent(Accessibility.ACTION_SWIPE));
-
-
-                        Logger.log(TAG, "Back press");
-                        sendBroadcast(new Intent(Accessibility.ACTION_BACK));
-
-//                        Logger.log(TAG, "Delaying back press");
-//                        final Handler handler = new Handler();
-//                        handler.postDelayed(new Runnable() {
-//                            @Override
-//                            public void run() {
-//                                if(active == 1) {
-//                                    Logger.log(TAG, "Back press");
-//                                    sendBroadcast(new Intent(Accessibility.ACTION_BACK));
-//                                }
-//                            }
-//                        }, delay);
-                    }
-                }
-            }, delay);
+        } else {
+            getWindow().setFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON, 0);
         }
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        mDevicePolicyManager = (DevicePolicyManager) getSystemService(
-                Context.DEVICE_POLICY_SERVICE);
-        mComponentName = new ComponentName(this, AdminReceiver.class);
-
-        adminSwitch = findViewById(R.id.admin_switch);
-        adminSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                if(!firstCheck) {
-                    if (isChecked) {
-                        Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-                        intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, mComponentName);
-                        intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, getResources().getString(R.string.admin_description));
-                        startActivityForResult(intent, ADMIN_INTENT);
-                    } else {
-                        mDevicePolicyManager.removeActiveAdmin(mComponentName);
-                        Toast.makeText(getApplicationContext(), getResources().getString(R.string.admin_removed), Toast.LENGTH_SHORT).show();
-                    }
-                }
-            }
-        });
-        adminSwitch.setChecked(mDevicePolicyManager.isAdminActive(mComponentName));
-
-
-        accessibilitySwitch = findViewById(R.id.accessibility_switch);
-        accessibilitySwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                if(!firstCheck) {
-                    Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-                    startActivity(intent);
-                    if (isChecked) {
-                        if (accessibilityCheck) Toast.makeText(getApplicationContext(), "Accessibility service enabled", Toast.LENGTH_SHORT).show();
-                    } else {
-//                        sendBroadcast(new Intent(Accessibility.ACTION_SERVICE_OFF));
-                        if (accessibilityCheck) Toast.makeText(getApplicationContext(), "Accessibility service disabled", Toast.LENGTH_SHORT).show();
-                    }
-                }
-            }
-        });
-        accessibilitySwitch.setChecked(isAccessibilityEnabled());
-
-        firstCheck = false;
-        accessibilityCheck = false;
+    private void lock() {
+        if(active) {
+            Logger.log(TAG, "Locking");
+            mDevicePolicyManager.lockNow();
+            finish();
+        }
     }
 
-    private void start() {
-        Logger.log(TAG, "Delaying locking");
-        final Handler handler = new Handler();
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
+    private void restartActivity() {
+        if(active && adsleft != 0) {
+            Logger.log(TAG, "Restarting activity");
+            Intent intent = getIntent();
+            intent.removeExtra("ACTIVE");
+            intent.putExtra("ACTIVE", active);
+            intent.putExtra("ads", adsleft);
+            finish();
+            startActivity(intent);
 
-                if(active == 1) {
-                    Logger.log(TAG, "Locking");
-                    mDevicePolicyManager.lockNow();
-
-                    Logger.log(TAG, "Delaying unlocking");
-                    final Handler handler = new Handler();
-                    handler.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            Intent intent = new Intent(getApplicationContext(), MainActivity.class);
-                            intent.putExtra("ACTIVE", active);
-                            Logger.log(TAG, "Unlocking");
-                            startActivity(intent);
-                        }
-                    }, delay);
-
-                    finish();
-                }
-            }
-        }, delay*3);
+        }
     }
 
+    private void closeAd() {
+        if(active) {
+            Logger.log(TAG, "Back press");
+            sendBroadcast(new Intent(Accessibility.ACTION_BACK));
+        }
+    }
+
+    private void setAlarm(int x) {
+        Logger.log(TAG, "Setting alarm: " + x + " minute(s)");
+        AlarmManager alarmMgr = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        Intent intent = getIntent();
+        intent.removeExtra("ACTIVE");
+        intent.putExtra("ACTIVE", active);
+        intent.putExtra("ads", initialAds);
+        PendingIntent alarmIntent = PendingIntent.getActivity(this, 0, intent, 0);
+
+        alarmMgr.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + 500,
+                x*60*1000,
+                alarmIntent);
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -326,7 +484,39 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         super.onBackPressed();
-        active = 0;
+        active = false;
+    }
+
+    private boolean isExpired() {
+        final boolean expired[] = new boolean[1];
+
+        expired[0] = pref.getBoolean("expired", false);
+
+        if(!expired[0]) {
+
+            Thread thread = new Thread(() -> {
+                SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
+                Date strDate;
+                expired[0] = false;
+                try {
+                    strDate = sdf.parse(EXPIRE_DATE);
+                    if (getTime().after(strDate)) {
+                        prefEditor.putBoolean("expired", true);
+                        prefEditor.commit();
+                        expired[0] = true;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+            thread.start();
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return expired[0];
     }
 
     public Date getTime() {
@@ -334,13 +524,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             TimeTCPClient client = new TimeTCPClient();
             try {
-                // Set timeout of 60 seconds
                 client.setDefaultTimeout(60000);
-                // Connecting to time server
-                // Other time servers can be found at : http://tf.nist.gov/tf-cgi/servers.cgi#
-                // Make sure that your program NEVER queries a server more frequently than once every 4 seconds
                 client.connect("time.nist.gov");
-//                System.out.println(client.getDate());
                 date = client.getDate();
                 return date;
             } finally {
@@ -352,41 +537,6 @@ public class MainActivity extends AppCompatActivity {
         }
         return null;
 
-//        try{
-//            //Make the Http connection so we can retrieve the time
-//            HttpClient httpclient = new DefaultHttpClient();
-//            // I am using yahoos api to get the time
-//            HttpResponse response = httpclient.execute(new
-//                    HttpGet("http://memownia.byethost33.com/meme/72"));
-//            StatusLine statusLine = response.getStatusLine();
-//            if(statusLine.getStatusCode() == HttpStatus.SC_OK){
-//                ByteArrayOutputStream out = new ByteArrayOutputStream();
-//                response.getEntity().writeTo(out);
-//                out.close();
-//                // The response is an xml file and i have stored it in a string
-//                String responseString = out.toString();
-//                Log.d("Response", responseString);
-//                //We have to parse the xml file using any parser, but since i have to
-//                //take just one value i have deviced a shortcut to retrieve it
-//                int x = responseString.indexOf("<Timestamp>");
-//                int y = responseString.indexOf("</Timestamp>");
-//                //I am using the x + "<Timestamp>" because x alone gives only the start value
-//                Log.d("Response", responseString.substring(x + "<Timestamp>".length(),y) );
-//                String timestamp =  responseString.substring(x + "<Timestamp>".length(),y);
-//                // The time returned is in UNIX format so i need to multiply it by 1000 to use it
-//                Date d = new Date(Long.parseLong(timestamp) * 1000);
-//                Log.d("Response", d.toString() );
-//                return d.toString() ;
-//            } else{
-//                //Closes the connection.
-//                response.getEntity().getContent().close();
-//                throw new IOException(statusLine.getReasonPhrase());
-//            }
-//        }catch (ClientProtocolException e) {
-//            Log.d("Response", e.getMessage());
-//        }catch (IOException e) {
-//            Log.d("Response", e.getMessage());
-//        }
-//        return null;
     }
+
 }
