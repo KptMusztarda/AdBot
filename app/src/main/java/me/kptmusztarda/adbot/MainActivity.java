@@ -35,10 +35,12 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
+import me.kptmusztarda.handylib.Logger;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    private static final String EXPIRE_DATE = "22/10/2018";
+    private static final String EXPIRE_DATE = "23/10/2018";
     private static final int ADMIN_INTENT = 15;
     private static final int SCALE = 100;
     private DevicePolicyManager mDevicePolicyManager;
@@ -57,8 +59,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String permissions[] = {
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
     };
-
-
 
     private void checkPermissions() {
         for(String p : permissions)
@@ -451,6 +451,7 @@ public class MainActivity extends AppCompatActivity {
         Intent intent = getIntent();
         intent.removeExtra("ACTIVE");
         intent.putExtra("ACTIVE", true);
+        Logger.log(TAG, "Putting ads Extra: " + initialAds);
         intent.putExtra("ads", initialAds);
         intent.putExtra("loop", "alarmfirst");
         PendingIntent alarmIntent = PendingIntent.getActivity(this, 0, intent, 0);

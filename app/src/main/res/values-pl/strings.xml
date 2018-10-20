@@ -15,6 +15,6 @@
     <string name="value_placeholder">wartość</string>
     <string name="run_every">Włącz co</string>
     <string name="minutes">minut(y)</string>
-    <string name="and_close">i zakmnij</string>
+    <string name="and_close">i zamknij</string>
     <string name="ads">reklam</string>
 </resources>

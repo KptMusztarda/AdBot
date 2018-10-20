@@ -5,14 +5,23 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Handler;
 import android.view.accessibility.AccessibilityEvent;
+
+import java.util.Timer;
+import java.util.TimerTask;
+
+import me.kptmusztarda.handylib.Logger;
+
 
 public class Accessibility extends AccessibilityService {
 
     private static final String TAG = "Accessibility";
     public static final String ACTION_BACK = "me.kptmusztarda.adbot.ACTION_BACK";
+    private Timer timer;
+    private Context context;
 
-    private BroadcastReceiver receiver = new BroadcastReceiver() {
+    private AccessibilityReceiver receiver = new AccessibilityReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             Logger.log(TAG, "Received: " + intent.getAction());
@@ -28,10 +37,16 @@ public class Accessibility extends AccessibilityService {
     }
 
     @Override
-    public void onCreate() {
-        super.onCreate();
-        registerReceiver(receiver, new IntentFilter(ACTION_BACK));
-        Logger.log(TAG, "BroadcastReceiver registered");
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        context = this;
+        timer = new Timer();
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                receiver.register(context, new IntentFilter(ACTION_BACK));
+            }
+        }, 0, 10*60*1000);
     }
 
     @Override
@@ -42,7 +57,10 @@ public class Accessibility extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(receiver);
-        Logger.log(TAG, "BroadcastReceiver unregistered");
+        receiver.unregister(context);
+        if(timer != null) {
+            timer.cancel();
+            timer.purge();
+        }
     }
 }
